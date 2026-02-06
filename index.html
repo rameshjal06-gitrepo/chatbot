@@ -1,1 +1,150 @@
-Hi welcome 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lightweight Chatbot – OpenRouter</title>
+  <style>
+    :root{
+      --bg:#0f172a;        /* slate-900 */
+      --panel:#111827;     /* gray-900 */
+      --muted:#94a3b8;     /* slate-400 */
+      --text:#e5e7eb;      /* gray-200 */
+      --accent:#6366f1;    /* indigo-500 */
+      --accent-2:#22d3ee;  /* cyan-400 */
+      --danger:#ef4444;    /* red-500 */
+      --ok:#10b981;        /* emerald-500 */
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial,sans-serif;background:linear-gradient(180deg,var(--bg),#0b1220 60%);color:var(--text);height:100vh;display:flex;flex-direction:column}
+    header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #1f2937;background:rgba(17,24,39,.6);backdrop-filter: blur(6px);position:sticky;top:0;z-index:10}
+    header h1{font-size:16px;margin:0;letter-spacing:.3px}
+    header .actions{display:flex;gap:8px}
+    button.icon{background:#111827;border:1px solid #1f2937;color:var(--text);border-radius:8px;padding:8px 10px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+    button.icon:hover{border-color:#334155}
+    main{display:grid;grid-template-rows:1fr auto;max-width:950px;width:100%;margin:0 auto;padding:8px 12px;gap:10px;flex:1}
+    #messages{overflow:auto;padding:10px 4px;display:flex;flex-direction:column;gap:12px}
+    .msg{display:flex;gap:10px;align-items:flex-start}
+    .msg .bubble{padding:10px 12px;border:1px solid #243043;background:#0b1220;border-radius:12px;max-width:90%}
+    .msg.user .bubble{background:#0f1a32;border-color:#2b3b55}
+    .msg.assistant .bubble{background:#0e192b;border-color:#223048}
+    .role{font-size:12px;color:var(--muted);margin-top:2px}
+
+    .composer{display:flex;gap:10px;align-items:flex-end;background:#0c1426;border:1px solid #1e293b;border-radius:12px;padding:10px;}
+    textarea{width:100%;min-height:46px;max-height:220px;resize:vertical;background:#0a1426;color:#e5e7eb;border:1px solid #1e293b;border-radius:8px;padding:10px}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .row .pill{padding:6px 10px;border:1px dashed #334155;border-radius:8px;font-size:12px;color:#94a3b8}
+    .send{background:linear-gradient(135deg,var(--accent),var(--accent-2));border:0;color:white;border-radius:8px;padding:10px 14px;cursor:pointer}
+    .stop{background:var(--danger)}
+
+    dialog{border:1px solid #253047;background:#0b1220;color:var(--text);border-radius:12px;width:min(680px,92vw)}
+    dialog header{position:unset;background:transparent;border:0;padding:8px 0}
+    dialog .grid{display:grid;grid-template-columns:1fr;gap:12px}
+    label{font-size:12px;color:#94a3b8}
+    input, select{width:100%;padding:10px;border-radius:8px;border:1px solid #243043;background:#0a1426;color:var(--text)}
+    .helper{font-size:12px;color:#94a3b8}
+    .kbd{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:12px;color:#a7f3d0}
+    footer{padding:8px 12px;text-align:center;color:#64748b;font-size:12px}
+    a{color:#a5b4fc}
+    .small{font-size:12px}
+    .system-box{width:100%;min-height:38px;max-height:120px;resize:vertical;background:#091226;color:var(--text);border:1px solid #243043;border-radius:8px;padding:8px}
+    .spinner{width:16px;height:16px;border:2px solid #324; border-top-color:#a5b4fc;border-radius:50%;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🔹 Lightweight Chatbot <span class="small">(OpenRouter)</span></h1>
+    <div class="actions">
+      <button id="settingsBtn" class="icon" title="Settings">⚙️ Settings</button>
+      <button id="clearBtn" class="icon" title="Clear chat">🧹 Clear</button>
+      <a class="icon" href="https://openrouter.ai/" target="_blank" rel="main>
+    <div id="messages"></div>
+
+    <div class="composer">
+      <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+        <div class="row">
+          <span class="pill">Model: <span id="modelChip" class="kbd">(unset)</span></span>
+          <span class="pill">Key: <span id="keyChip" class="kbd">(unset)</span></span>
+        </div>
+        <textarea id="prompt" placeholder="Type your message and press Enter… (Shift+Enter for newline)"></textarea>
+        <label class="small" for="system">System message (optional)</label>
+        <textarea id="system" class="system-box" placeholder="You are a helpful assistant."></textarea>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button id="sendBtn" class="send">Send ▷</button>
+      </div>
+    </div>
+  </main>
+
+  <dialog id="settings">
+    <header>
+      <h3 style="margin:0">Settings</h3>
+    </header>
+    <div class="grid">
+      <div>
+        <label for="apiKey">OpenRouter API Key</label>
+        <input id="apiKey" type="password" placeholder="sk-or-v1-..." autocomplete="off" />
+        <div class="helper">Get a key at https://openrouter.ai/keysopenrouter.ai/keys</a>. Your key is only stored in your browser's <code>localStorage</code>.</div>
+      </div>
+      <div>
+        <label for="model">Model</label>
+        <input id="model" list="modelList" placeholder="e.g., openrouter/auto, openai/gpt-4o-mini, anthropic/claude-3.5-sonnet" />
+        <datalist id="modelList">
+          <option value="openrouter/auto"></option>
+          <option value="openai/gpt-4o-mini"></option>
+          <option value="openai/gpt-4.1-mini"></option>
+          <option value="anthropic/claude-3.5-sonnet"></option>
+          <option value="qwen/qwen-2.5-7b-instruct"></option>
+          <option value="meta-llama/llama-3.1-8b-instruct"></option>
+        </datalist>
+        <div class="helper">Find available models at <atps://openrouter.ai/modelsopenrouter.ai/models</a>.</div>
+      </div>
+      <div class="row">
+        <button id="saveBtn" class="icon" style="background:#0b172a;border-color:#243043">💾 Save</button>
+        <button id="closeBtn" class="icon">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <footer>
+    Built for local use. No server required. Requests go directly from your browser to OpenRouter.
+  </footer>
+
+  <script>
+    // --- State & Utilities ---
+    const d = (sel) => document.querySelector(sel);
+    const messagesEl = d('#messages');
+    const promptEl = d('#prompt');
+    const systemEl = d('#system');
+    const sendBtn = d('#sendBtn');
+    const modelChip = d('#modelChip');
+    const keyChip = d('#keyChip');
+
+    const settingsDlg = d('#settings');
+    const settingsBtn = d('#settingsBtn');
+    const clearBtn = d('#clearBtn');
+    const apiKeyEl = d('#apiKey');
+    const modelEl = d('#model');
+    const saveBtn = d('#saveBtn');
+    const closeBtn = d('#closeBtn');
+
+    const LS_KEY = 'or_chat_settings_v1';
+    const LS_HISTORY = 'or_chat_history_v1';
+
+    function saveSettings(s){
+      localStorage.setItem(LS_KEY, JSON.stringify(s));
+      refreshChips();
+    }
+
+    function loadSettings(){
+      try{ return JSON.parse(localStorage.getItem(LS_KEY)) || {}; }
+      catch{ return {}; }
+    }
+
+    function refreshChips(){
+      const { apiKey, model } = loadSettings();
+      modelChip.textContent = model || '(unset)';
+      keyChip.textContent = apiKey ? '●●●●-saved' : '(unset)';
+    }
+
