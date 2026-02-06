@@ -277,4 +277,354 @@
                     div.className = `group flex items-center justify-between p-3 rounded-full cursor-pointer transition-colors text-sm ${isActive ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'}`;
                     
                     div.innerHTML = `
-                        <div class="flex items-center gap-3 overflow-hidden" onclick="app.
+                        <div class="flex items-center gap-3 overflow-hidden" onclick="app.switchChat('${chat.id}')">
+                            <i class="ph ${isActive ? 'ph-chat-circle-text' : 'ph-chat-circle'} text-lg"></i>
+                            <span class="truncate">${chat.title}</span>
+                        </div>
+                        ${isActive ? `
+                        <button onclick="event.stopPropagation(); app.renameChat('${chat.id}')" class="opacity-0 group-hover:opacity-100 p-1 hover:text-blue-600 dark:hover:text-blue-400">
+                            <i class="ph ph-pencil-simple"></i>
+                        </button>
+                        ` : ''}
+                    `;
+                    els.chatList.appendChild(div);
+                });
+            }
+
+            function renderMessages() {
+                els.msgList.innerHTML = '';
+                const chat = state.chats.find(c => c.id === state.activeChatId);
+
+                if (!chat || chat.messages.length === 0) {
+                    els.welcome.classList.remove('hidden');
+                    els.msgList.classList.add('hidden');
+                    els.title.innerText = 'New Chat';
+                    return;
+                }
+
+                els.welcome.classList.add('hidden');
+                els.msgList.classList.remove('hidden');
+                els.title.innerText = chat.title;
+
+                chat.messages.forEach(msg => {
+                    const div = document.createElement('div');
+                    const isUser = msg.role === 'user';
+                    
+                    div.className = `flex ${isUser ? 'justify-end' : 'justify-start'} message-animation`;
+                    
+                    const contentHtml = isUser ? 
+                        `<div class="bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-100 px-5 py-3 rounded-2xl rounded-tr-sm max-w-[85%] sm:max-w-[75%] whitespace-pre-wrap leading-relaxed">${escapeHtml(msg.content)}</div>` :
+                        `<div class="flex gap-4 max-w-full sm:max-w-[90%]">
+                            <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center flex-shrink-0 mt-1">
+                                <i class="ph ph-sparkle text-white text-sm"></i>
+                            </div>
+                            <div class="prose dark:prose-invert max-w-none text-gray-800 dark:text-gray-200 text-sm sm:text-base leading-7 pt-1 overflow-hidden">
+                                ${marked.parse(msg.content)}
+                            </div>
+                        </div>`;
+
+                    div.innerHTML = contentHtml;
+                    els.msgList.appendChild(div);
+                });
+
+                scrollToBottom();
+            }
+
+            function scrollToBottom() {
+                const container = document.getElementById('chat-container');
+                container.scrollTop = container.scrollHeight;
+            }
+
+            function escapeHtml(text) {
+                const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+                return text.replace(/[&<>"']/g, m => map[m]);
+            }
+
+            // --- Actions ---
+            function createNewChat() {
+                const id = Date.now().toString(36) + Math.random().toString(36).substr(2);
+                const newChat = {
+                    id,
+                    title: 'New Chat',
+                    messages: [],
+                    updatedAt: Date.now()
+                };
+                state.chats.unshift(newChat);
+                state.activeChatId = id;
+                saveState();
+                renderSidebar();
+                renderMessages();
+                
+                if (window.innerWidth < 768) {
+                    els.sidebar.classList.add('-translate-x-full');
+                    els.overlay.classList.add('hidden');
+                }
+                
+                els.input.focus();
+            }
+
+            function switchChat(id) {
+                state.activeChatId = id;
+                saveState();
+                renderSidebar();
+                renderMessages();
+                if (window.innerWidth < 768) {
+                    els.sidebar.classList.add('-translate-x-full');
+                    els.overlay.classList.add('hidden');
+                }
+            }
+
+            function deleteCurrentChat() {
+                if (!confirm('Delete this chat?')) return;
+                state.chats = state.chats.filter(c => c.id !== state.activeChatId);
+                state.activeChatId = state.chats.length > 0 ? state.chats[0].id : null;
+                if (!state.activeChatId) createNewChat();
+                else {
+                    saveState();
+                    renderSidebar();
+                    renderMessages();
+                }
+            }
+
+            function renameChat(id) {
+                const chat = state.chats.find(c => c.id === id);
+                if (!chat) return;
+                const newTitle = prompt('Rename chat:', chat.title);
+                if (newTitle) {
+                    chat.title = newTitle;
+                    saveState();
+                    renderSidebar();
+                    // Update header if active
+                    if (id === state.activeChatId) els.title.innerText = newTitle;
+                }
+            }
+
+            // --- API & Streaming ---
+            async function sendMessage() {
+                const text = els.input.value.trim();
+                if (!text || state.isGenerating) return;
+
+                if (!state.settings.apiKey) {
+                    alert('Please set your OpenRouter API Key in Settings.');
+                    toggleSettings();
+                    return;
+                }
+
+                // UI Updates
+                els.input.value = '';
+                els.input.style.height = 'auto';
+                state.isGenerating = true;
+                els.sendBtn.disabled = true;
+                els.sendBtn.innerHTML = '<i class="ph ph-stop animate-pulse"></i>';
+
+                // Find or Create Chat
+                let chat = state.chats.find(c => c.id === state.activeChatId);
+                if (!chat) {
+                    createNewChat();
+                    chat = state.chats.find(c => c.id === state.activeChatId);
+                }
+
+                // Add User Message
+                chat.messages.push({ role: 'user', content: text });
+                // Auto-title if first message
+                if (chat.messages.length === 1) {
+                    chat.title = text.slice(0, 30) + (text.length > 30 ? '...' : '');
+                }
+                chat.updatedAt = Date.now();
+                saveState();
+                renderSidebar();
+                renderMessages();
+
+                // Prepare AI Message Placeholder
+                const aiMsgIndex = chat.messages.length;
+                chat.messages.push({ role: 'assistant', content: '' }); // Placeholder
+                
+                // Create DOM element for streaming
+                const msgDiv = document.createElement('div');
+                msgDiv.className = 'flex justify-start message-animation';
+                msgDiv.innerHTML = `
+                    <div class="flex gap-4 max-w-full sm:max-w-[90%]">
+                        <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center flex-shrink-0 mt-1">
+                            <i class="ph ph-sparkle text-white text-sm"></i>
+                        </div>
+                        <div class="prose dark:prose-invert max-w-none text-gray-800 dark:text-gray-200 text-sm sm:text-base leading-7 pt-1 overflow-hidden" id="streaming-msg">
+                            <span class="typing-cursor"></span>
+                        </div>
+                    </div>`;
+                els.msgList.appendChild(msgDiv);
+                els.welcome.classList.add('hidden');
+                els.msgList.classList.remove('hidden');
+                scrollToBottom();
+
+                const streamElem = msgDiv.querySelector('#streaming-msg');
+                let fullContent = '';
+
+                try {
+                    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                        method: "POST",
+                        headers: {
+                            "Authorization": `Bearer ${state.settings.apiKey}`,
+                            "Content-Type": "application/json",
+                            "HTTP-Referer": window.location.href, // OpenRouter requirement
+                            "X-Title": "Universal AI Interface"
+                        },
+                        body: JSON.stringify({
+                            model: state.settings.model,
+                            messages: [
+                                { role: "system", content: state.settings.systemPrompt },
+                                ...chat.messages.slice(0, -1) // Exclude empty placeholder
+                            ],
+                            stream: true
+                        })
+                    });
+
+                    if (!response.ok) throw new Error(`API Error: ${response.status}`);
+
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder("utf-8");
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        const chunk = decoder.decode(value);
+                        const lines = chunk.split("\n");
+                        
+                        for (const line of lines) {
+                            if (line.startsWith("data: ") && line !== "data: [DONE]") {
+                                try {
+                                    const json = JSON.parse(line.slice(6));
+                                    const content = json.choices[0]?.delta?.content || "";
+                                    fullContent += content;
+                                    
+                                    // Update visual stream (Raw text + cursor during stream)
+                                    // We don't run full markdown parse on every token for performance, 
+                                    // but we update the text content.
+                                    // For a better experience, we can parse MD periodically or just text.
+                                    // Here we update text content for raw output, then final MD later.
+                                    // To make it look good, we parse MD if length % 50 === 0 or just insert text.
+                                    // Simple approach: Update innerHTML with parsed MD on the fly:
+                                    streamElem.innerHTML = marked.parse(fullContent) + '<span class="typing-cursor"></span>';
+                                    scrollToBottom();
+                                } catch (e) { console.error("Parse Error", e); }
+                            }
+                        }
+                    }
+
+                    // Finalize
+                    chat.messages[aiMsgIndex].content = fullContent;
+                    streamElem.innerHTML = marked.parse(fullContent); // Remove cursor
+                    saveState();
+                    
+                } catch (error) {
+                    chat.messages[aiMsgIndex].content = `**Error:** ${error.message}`;
+                    streamElem.innerHTML = marked.parse(`**Error:** ${error.message}`);
+                    saveState();
+                } finally {
+                    state.isGenerating = false;
+                    els.sendBtn.disabled = false;
+                    els.sendBtn.innerHTML = '<i class="ph ph-arrow-up font-bold"></i>';
+                    els.input.focus();
+                }
+            }
+
+            // --- Settings & UI Toggles ---
+            function toggleSidebar() {
+                const isClosed = els.sidebar.classList.contains('-translate-x-full');
+                if (isClosed) {
+                    els.sidebar.classList.remove('-translate-x-full');
+                    els.overlay.classList.remove('hidden');
+                } else {
+                    els.sidebar.classList.add('-translate-x-full');
+                    els.overlay.classList.add('hidden');
+                }
+            }
+
+            function toggleSettings() {
+                const isHidden = els.settingsModal.classList.contains('hidden');
+                if (isHidden) {
+                    els.inputs.apiKey.value = state.settings.apiKey;
+                    els.inputs.model.value = state.settings.model;
+                    els.inputs.system.value = state.settings.systemPrompt;
+                    els.settingsModal.classList.remove('hidden');
+                } else {
+                    els.settingsModal.classList.add('hidden');
+                }
+            }
+
+            function saveSettings() {
+                state.settings.apiKey = els.inputs.apiKey.value.trim();
+                state.settings.model = els.inputs.model.value.trim() || 'deepseek/deepseek-r1:free';
+                state.settings.systemPrompt = els.inputs.system.value.trim();
+                saveState();
+                toggleSettings();
+                renderBadge();
+                alert('Settings Saved');
+            }
+
+            function toggleTheme() {
+                const html = document.documentElement;
+                if (html.classList.contains('dark')) {
+                    html.classList.remove('dark');
+                    localStorage.setItem('uai_theme', 'light');
+                    document.getElementById('theme-icon').className = 'ph ph-moon text-xl';
+                } else {
+                    html.classList.add('dark');
+                    localStorage.setItem('uai_theme', 'dark');
+                    document.getElementById('theme-icon').className = 'ph ph-sun text-xl';
+                }
+            }
+
+            function renderBadge() {
+                els.modelBadge.innerText = state.settings.model.split('/').pop();
+            }
+
+            // --- Initialization ---
+            function init() {
+                loadState();
+                
+                // Initialize Icon state
+                const isDark = document.documentElement.classList.contains('dark');
+                document.getElementById('theme-icon').className = isDark ? 'ph ph-sun text-xl' : 'ph ph-moon text-xl';
+
+                renderSidebar();
+                renderBadge();
+
+                if (state.chats.length > 0) {
+                     // Check if active chat still exists
+                     const exists = state.chats.find(c => c.id === state.activeChatId);
+                     if (!exists) state.activeChatId = state.chats[0].id;
+                     renderMessages();
+                } else {
+                    createNewChat();
+                }
+
+                // Hide Loader
+                setTimeout(() => {
+                    els.loading.style.opacity = '0';
+                    setTimeout(() => els.loading.remove(), 500);
+                    els.app.classList.remove('hidden');
+                    els.app.classList.remove('opacity-0');
+                }, 800);
+            }
+
+            // Expose public methods
+            return {
+                init,
+                toggleSidebar,
+                toggleSettings,
+                saveSettings,
+                toggleTheme,
+                createNewChat,
+                switchChat,
+                renameChat,
+                deleteCurrentChat,
+                sendMessage
+            };
+        })();
+
+        // Start App on Load
+        document.addEventListener('DOMContentLoaded', app.init);
+    </script>
+</body>
+</html>
